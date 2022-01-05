@@ -108,7 +108,13 @@ public class IngredientServiceImpl implements IngredientService {
             }
 
             //to do check for fail
-            return ingredientToIngredientCommand.convert(savedIngredientOptional.get());
+            if (savedIngredientOptional.isPresent()) {
+                IngredientCommand convert = ingredientToIngredientCommand.convert(savedIngredientOptional.get());
+                assert convert != null;
+                convert.setRecipeId(recipe.getId());
+                return convert;
+            }
+            return null;
         }
 
     }
