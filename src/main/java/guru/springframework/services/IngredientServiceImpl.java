@@ -5,15 +5,18 @@ import guru.springframework.converters.IngredientCommandToIngredient;
 import guru.springframework.converters.IngredientToIngredientCommand;
 import guru.springframework.domain.Ingredient;
 import guru.springframework.domain.Recipe;
-import guru.springframework.repositories.RecipeRepository;
+import guru.springframework.domain.UnitOfMeasure;
 import guru.springframework.repositories.reactive.RecipeReactiveRepository;
 import guru.springframework.repositories.reactive.UnitOfMeasureReactiveRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+import reactor.util.function.Tuple2;
 
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import static java.util.Objects.isNull;
 
@@ -48,6 +51,7 @@ public class IngredientServiceImpl implements IngredientService {
                 .single()
                 .map(ingredient -> {
                     IngredientCommand command = ingredientToIngredientCommand.convert(ingredient);
+                    assert command != null;
                     command.setRecipeId(recipeId);
                     return command;
                 });
@@ -56,59 +60,43 @@ public class IngredientServiceImpl implements IngredientService {
     @Override
     @Transactional
     public Mono<IngredientCommand> saveIngredientCommand(IngredientCommand command) {
-        Recipe recipe = recipeReactiveRepository.findById(command.getRecipeId()).block();
+        Mono<Recipe> recipeMono = recipeReactiveRepository.findById(command.getRecipeId());
+        Mono<Ingredient> ingredientMono = findOrCreateIngredient(recipeMono, command);
+        return recipeMono.zipWith(ingredientMono)
+                .publishOn(Schedulers.parallel())
+                .doOnNext(recipeIngredient -> recipeReactiveRepository.save(recipeIngredient.getT1()))
+                .map(recipeIngredient -> {
+                    IngredientCommand commandIngredient = ingredientToIngredientCommand.convert(recipeIngredient.getT2());
+                    commandIngredient.setRecipeId(recipeIngredient.getT1().getId());
+                    return commandIngredient;
+                })
+                .defaultIfEmpty(new IngredientCommand());
+    }
 
-        if (isNull(recipe)) {
-            //todo toss error if not found!
-            log.error("Recipe not found for id: " + command.getRecipeId());
-            return Mono.just(new IngredientCommand());
-        } else {
+    private Mono<Ingredient> findOrCreateIngredient(Mono<Recipe> recipeMono, IngredientCommand command) {
+        return recipeMono.flatMapIterable(Recipe::getIngredients)
+                .filter(ingredient -> ingredient.getId().equals(command.getId()))
+                .single()
+                .zipWith(unitOfMeasureRepository.findById(command.getUom().getId()))
+                .doOnNext(updateIngredient(command))
+                .map(Tuple2::getT1)
+                .switchIfEmpty(addNewIngredientIntoRecipe(recipeMono, command));
+    }
 
-            Optional<Ingredient> ingredientOptional = recipe
-                    .getIngredients()
-                    .stream()
-                    .filter(ingredient -> ingredient.getId().equals(command.getId()))
-                    .findFirst();
+    private Consumer<Tuple2<Ingredient, UnitOfMeasure>> updateIngredient(IngredientCommand command) {
+        return ingredientAndUom -> {
+            Ingredient ingredient = ingredientAndUom.getT1();
+            ingredient.setDescription(command.getDescription());
+            ingredient.setAmount(command.getAmount());
+            ingredient.setUom(ingredientAndUom.getT2());
+        };
+    }
 
-            if (ingredientOptional.isPresent()) {
-                Ingredient ingredientFound = ingredientOptional.get();
-                ingredientFound.setDescription(command.getDescription());
-                ingredientFound.setAmount(command.getAmount());
-                ingredientFound.setUom(unitOfMeasureRepository
-                        .findById(command.getUom().getId()).block());
-            } else {
-                //add new Ingredient
-                Ingredient ingredient = ingredientCommandToIngredient.convert(command);
-                //  ingredient.setRecipe(recipe);
-                recipe.addIngredient(ingredient);
-            }
-
-            Recipe savedRecipe = recipeReactiveRepository.save(recipe).block();
-
-            Optional<Ingredient> savedIngredientOptional = savedRecipe.getIngredients().stream()
-                    .filter(recipeIngredients -> recipeIngredients.getId().equals(command.getId()))
-                    .findFirst();
-
-            //check by description
-            if (!savedIngredientOptional.isPresent()) {
-                //not totally safe... But best guess
-                savedIngredientOptional = savedRecipe.getIngredients().stream()
-                        .filter(recipeIngredients -> recipeIngredients.getDescription().equals(command.getDescription()))
-                        .filter(recipeIngredients -> recipeIngredients.getAmount().equals(command.getAmount()))
-                        .filter(recipeIngredients -> recipeIngredients.getUom().getId().equals(command.getUom().getId()))
-                        .findFirst();
-            }
-
-            //to do check for fail
-            if (savedIngredientOptional.isPresent()) {
-                IngredientCommand convert = ingredientToIngredientCommand.convert(savedIngredientOptional.get());
-                assert convert != null;
-                convert.setRecipeId(recipe.getId());
-                return Mono.just(convert);
-            }
-            return Mono.empty();
-        }
-
+    private Mono<Ingredient> addNewIngredientIntoRecipe(Mono<Recipe> recipeMono, IngredientCommand command) {
+        return recipeMono
+                .zipWith(Mono.just(ingredientCommandToIngredient.convert(command)))
+                .doOnNext(m -> m.getT1().addIngredient(m.getT2()))
+                .map(Tuple2::getT2);
     }
 
     @Override

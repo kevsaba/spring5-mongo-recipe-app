@@ -1,12 +1,14 @@
 package guru.springframework.services;
 
 import guru.springframework.commands.IngredientCommand;
+import guru.springframework.commands.UnitOfMeasureCommand;
 import guru.springframework.converters.IngredientCommandToIngredient;
 import guru.springframework.converters.IngredientToIngredientCommand;
 import guru.springframework.converters.UnitOfMeasureCommandToUnitOfMeasure;
 import guru.springframework.converters.UnitOfMeasureToUnitOfMeasureCommand;
 import guru.springframework.domain.Ingredient;
 import guru.springframework.domain.Recipe;
+import guru.springframework.domain.UnitOfMeasure;
 import guru.springframework.repositories.RecipeRepository;
 import guru.springframework.repositories.UnitOfMeasureRepository;
 import guru.springframework.repositories.reactive.RecipeReactiveRepository;
@@ -15,7 +17,9 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 import java.util.Optional;
 
@@ -90,22 +94,43 @@ public class IngredientServiceImplTest {
         IngredientCommand command = new IngredientCommand();
         command.setId("3");
         command.setRecipeId("2");
+        command.setUom(new UnitOfMeasureCommand());
+        command.getUom().setId("123");
+
+        Ingredient ingredient = new Ingredient();
+        ingredient.setId("222s");
 
         Recipe savedRecipe = new Recipe();
-        savedRecipe.addIngredient(new Ingredient());
+        savedRecipe.addIngredient(ingredient);
         savedRecipe.getIngredients().iterator().next().setId("3");
 
-        when(recipeReactiveRepository.findById(anyString())).thenReturn(Mono.just(new Recipe()));
-        when(recipeReactiveRepository.save(any())).thenReturn(Mono.just(savedRecipe));
+        when(recipeReactiveRepository.findById(anyString())).thenReturn(Mono.just(savedRecipe));
+        when(unitOfMeasureRepository.findById(anyString())).thenReturn(Mono.just(new UnitOfMeasure()));
 
         //when
-        IngredientCommand savedCommand = ingredientService.saveIngredientCommand(command).block();
+        StepVerifier.create(ingredientService.saveIngredientCommand(command))
+                .expectNextMatches(savedIngredientCommand -> savedIngredientCommand.getId().equals(command.getId()))
+                .expectComplete()
+                .verify();
 
         //then
-        assertEquals("3", savedCommand.getId());
         verify(recipeReactiveRepository, times(1)).findById(anyString());
         verify(recipeReactiveRepository, times(1)).save(any(Recipe.class));
 
+    }
+
+    @Test
+    public void testToPracticeStepVerifier() {
+        Flux<String> source = Flux.just("John", "Monica", "Mark", "Cloe", "Frank", "Casper", "Olivia", "Emily", "Cate")
+                .filter(name -> name.length() == 4)
+                .map(String::toUpperCase);
+
+        StepVerifier.create(source)
+                .expectNext("JOHN")
+                .expectNextMatches(p -> p.startsWith("MA"))
+                .expectNext("CLOE","CATE")
+                .expectComplete()
+                .verify();
     }
 
     @Test
