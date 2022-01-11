@@ -14,3 +14,7 @@ This is a project done with Spring Boot Reactive, Gradel, Mongo, JUnit5, Lombok,
 
 - The idea of this project its to cover reactive programing this is something that I used when working with Node.js something that doesnt block the UI when reciving request and having to talk to other services or just fetch data from the DataBase, we are using MongoDb because it's capable of handling reactive programing MYSQL im not aware at the time of typing this.
 - Reactive programing using Spring its by using in this case ReactiveMongoRepository which will be the interface used like the CrudRepository on the normal recipe with Mysql, but in this case Reactive interface whill handle not Optional but Mono (meaning zero or 1 object at the time) or Flux (meaning zero or multiple objects at the time) this are capable of interacting with other things but will not block any thread until for example .block() its called manually or if the Client UI side its capable of handling this then it will consume it without stoping the UI and will run in the background.
+
+
+Here it is a git repo from someone who is worth to check his implementation of webflux I think he has pretty good understanding 
+https://github.com/marco-ceriani/spring5-recipe-app/tree/7efc884e4074c8f79b77122d8ccec72460610874
